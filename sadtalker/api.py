@@ -11,11 +11,13 @@ Usage:
 
 import os
 import tempfile
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 from PIL import Image
 from skimage import img_as_ubyte
+from tqdm import tqdm as _tqdm
 
 _PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -33,7 +35,7 @@ import torch
 class SadTalker:
     """Wraps the 3-stage SadTalker pipeline into a single callable."""
 
-    def __init__(self, checkpoint_path: str, device: str = "cuda", size: int = 256):
+    def __init__(self, checkpoint_path: str, device: str = "cuda", size: int = 256, verbose: bool = False):
         config_dir = os.path.join(_PACKAGE_DIR, "config")
         sadtalker_paths = init_path(checkpoint_path, config_dir, size=size, preprocess="crop")
 
@@ -42,6 +44,7 @@ class SadTalker:
         self.animate_from_coeff = AnimateFromCoeff(sadtalker_paths, device)
         self.device = device
         self.size = size
+        self.verbose = verbose
 
     @torch.inference_mode()
     def generate(self, image: Image.Image, audio_path: str, pose_style: int = 0) -> list[Image.Image]:
@@ -60,6 +63,18 @@ class SadTalker:
         Returns:
             List of PIL.Image frames at the original image resolution.
         """
+        if self.verbose:
+            return self._generate(image, audio_path, pose_style)
+
+        # Suppress all tqdm progress bars by patching tqdm across all sadtalker modules
+        silent_tqdm = lambda *a, **kw: _tqdm(*a, **kw, disable=True)
+        with patch("sadtalker.utils.preprocess.tqdm", silent_tqdm), \
+             patch("sadtalker.generate_batch.tqdm", silent_tqdm), \
+             patch("sadtalker.audio2exp_models.audio2exp.tqdm", silent_tqdm), \
+             patch("sadtalker.facerender.modules.make_animation.tqdm", silent_tqdm):
+            return self._generate(image, audio_path, pose_style)
+
+    def _generate(self, image: Image.Image, audio_path: str, pose_style: int = 0) -> list[Image.Image]:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save input image to disk (SadTalker expects file paths)
             pic_path = os.path.join(tmpdir, "source.png")
