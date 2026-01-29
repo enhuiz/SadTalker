@@ -47,7 +47,7 @@ class SadTalker:
         self.verbose = verbose
 
     @torch.inference_mode()
-    def generate(self, image: Image.Image, audio_path: str, pose_style: int = 0) -> list[Image.Image]:
+    def generate(self, image: Image.Image, audio_path: str, pose_style: int = 0) -> tuple[list[Image.Image], np.ndarray]:
         """
         Generate talking-head video frames from a single face image and audio.
 
@@ -61,7 +61,9 @@ class SadTalker:
             pose_style: Head motion style index (0-45).
 
         Returns:
-            List of PIL.Image frames at the original image resolution.
+            Tuple of (frames, crop_mask) where frames is a list of PIL.Image
+            at the original resolution, and crop_mask is a numpy uint8 array
+            (H, W) with 255 inside the composited face region and 0 elsewhere.
         """
         if self.verbose:
             return self._generate(image, audio_path, pose_style)
@@ -74,7 +76,7 @@ class SadTalker:
              patch("sadtalker.facerender.modules.make_animation.tqdm", silent_tqdm):
             return self._generate(image, audio_path, pose_style)
 
-    def _generate(self, image: Image.Image, audio_path: str, pose_style: int = 0) -> list[Image.Image]:
+    def _generate(self, image: Image.Image, audio_path: str, pose_style: int = 0) -> tuple[list[Image.Image], np.ndarray]:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save input image to disk (SadTalker expects file paths)
             pic_path = os.path.join(tmpdir, "source.png")
@@ -107,7 +109,14 @@ class SadTalker:
             # Stage 4: Composite animated face back into original image
             frames = self._composite(face_frames, image, crop_info)
 
-        return frames
+            # Build binary mask of the composited region
+            _r_wh, crop, _quad = crop_info
+            clx, cly, crx, cry = crop
+            h_orig, w_orig = np.array(image).shape[:2]
+            crop_mask = np.zeros((h_orig, w_orig), dtype=np.uint8)
+            crop_mask[cly:cry, clx:crx] = 255
+
+        return frames, crop_mask
 
     @staticmethod
     def _composite(
