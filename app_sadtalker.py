@@ -1,6 +1,6 @@
 import os, sys
 import gradio as gr
-from src.gradio_demo import SadTalker  
+from sadtalker.gradio_demo import SadTalker  
 
 
 try:
@@ -45,7 +45,7 @@ def sadtalker_demo(checkpoint_path='checkpoints', config_path='src/config', warp
                             driven_audio = gr.Audio(label="Input audio", source="upload", type="filepath")
 
                         if sys.platform != 'win32' and not in_webui: 
-                            from src.utils.text2speech import TTSTalker
+                            from sadtalker.utils.text2speech import TTSTalker
                             tts_talker = TTSTalker()
                             with gr.Column(variant='panel'):
                                 input_text = gr.Textbox(label="Generating audio from text", lines=5, placeholder="please enter some text here, we genreate the audio from text using @Coqui.ai TTS.")

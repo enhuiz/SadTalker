@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sadtalker"
+version = "0.0.2"
+requires-python = ">=3.10"
+# Minimal deps — heavy deps (torch, etc.) are provided by the parent project.
+dependencies = [
+    "librosa",
+    "yacs",
+    "pydub",
+    "safetensors",
+    "scipy",
+    "scikit-image",
+    "imageio",
+    "imageio-ffmpeg",
+    "kornia",
+    "tqdm",
+    "pyyaml",
+    "facexlib",
+    "gfpgan",
+    "basicsr",
+]
+
+[tool.setuptools.packages.find]
+include = ["sadtalker*"]
+
+[tool.setuptools.package-data]
+sadtalker = ["config/*.yaml", "config/*.mat"]
+
+[tool.uv.sources]
+gfpgan = { git = "https://github.com/enhuiz/GFPGAN" }
+basicsr = { git = "https://github.com/enhuiz/BasicSR" }
