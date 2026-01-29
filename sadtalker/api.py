@@ -69,8 +69,10 @@ class SadTalker:
             os.makedirs(first_frame_dir, exist_ok=True)
 
             # Stage 1: Crop and extract 3DMM coefficients
+            # Use "extcrop" so the cropped region includes surrounding context
+            # (not just the tight face quad), producing smoother compositing.
             first_coeff_path, crop_pic_path, crop_info = self.preprocess_model.generate(
-                pic_path, first_frame_dir, crop_or_resize="crop",
+                pic_path, first_frame_dir, crop_or_resize="extcrop",
                 source_image_flag=True, pic_size=self.size,
             )
             if first_coeff_path is None:
@@ -98,19 +100,34 @@ class SadTalker:
         original: Image.Image,
         crop_info: tuple,
     ) -> list[Image.Image]:
-        """Paste animated face crops back into the original image via seamless clone."""
+        """Paste animated face crops back into the original image via seamless clone.
+
+        Uses the extended crop region (not the tight face quad) so the paste
+        area includes more surrounding context, producing smoother blending.
+        A feathered (Gaussian-blurred) mask further softens the boundary.
+        """
         full_img = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
 
-        _r_wh, crop, quad = crop_info
+        _r_wh, crop, _quad = crop_info
         clx, cly, crx, cry = crop
-        lx, ly, rx, ry = [int(v) for v in quad]
-        oy1, oy2, ox1, ox2 = cly + ly, cly + ry, clx + lx, clx + rx
+        # Use extended crop box — matches SadTalker's "full" paste mode
+        oy1, oy2, ox1, ox2 = cly, cry, clx, crx
 
         composited = []
         for face_pil in face_frames:
             face_bgr = cv2.cvtColor(np.array(face_pil), cv2.COLOR_RGB2BGR)
-            resized = cv2.resize(face_bgr, (ox2 - ox1, oy2 - oy1))
+            w, h = ox2 - ox1, oy2 - oy1
+            resized = cv2.resize(face_bgr, (w, h))
+
+            # Feathered mask: full white interior, Gaussian-blurred edges
             mask = 255 * np.ones(resized.shape, resized.dtype)
+            border = max(int(min(w, h) * 0.1), 4)
+            mask[:border] = 0
+            mask[-border:] = 0
+            mask[:, :border] = 0
+            mask[:, -border:] = 0
+            mask = cv2.GaussianBlur(mask, (border * 2 + 1, border * 2 + 1), 0)
+
             center = ((ox1 + ox2) // 2, (oy1 + oy2) // 2)
             blended = cv2.seamlessClone(resized, full_img, mask, center, cv2.NORMAL_CLONE)
             composited.append(Image.fromarray(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB)))
