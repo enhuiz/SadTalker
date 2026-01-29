@@ -12,6 +12,7 @@ Usage:
 import os
 import tempfile
 
+import cv2
 import numpy as np
 from PIL import Image
 from skimage import img_as_ubyte
@@ -47,13 +48,17 @@ class SadTalker:
         """
         Generate talking-head video frames from a single face image and audio.
 
+        The animated face is composited back into the original image using
+        seamless cloning, so the output preserves the full scene (background,
+        body, etc.) at the original resolution.
+
         Args:
             image: Source face image (PIL).
             audio_path: Path to audio file (.wav).
             pose_style: Head motion style index (0-45).
 
         Returns:
-            List of PIL.Image frames (256×256 RGB).
+            List of PIL.Image frames at the original image resolution.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save input image to disk (SadTalker expects file paths)
@@ -75,14 +80,42 @@ class SadTalker:
             batch = get_data(first_coeff_path, audio_path, self.device, ref_eyeblink_coeff_path=None)
             coeff_path = self.audio_to_coeff.generate(batch, tmpdir, pose_style)
 
-            # Stage 3: Render frames (skip MP4 round-trip)
+            # Stage 3: Render face crop frames
             data = get_facerender_data(
                 coeff_path, crop_pic_path, first_coeff_path, audio_path,
                 batch_size=2, size=self.size,
             )
-            frames = self._render_frames(data)
+            face_frames = self._render_frames(data)
+
+            # Stage 4: Composite animated face back into original image
+            frames = self._composite(face_frames, image, crop_info)
 
         return frames
+
+    @staticmethod
+    def _composite(
+        face_frames: list[Image.Image],
+        original: Image.Image,
+        crop_info: tuple,
+    ) -> list[Image.Image]:
+        """Paste animated face crops back into the original image via seamless clone."""
+        full_img = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
+
+        _r_wh, crop, quad = crop_info
+        clx, cly, crx, cry = crop
+        lx, ly, rx, ry = [int(v) for v in quad]
+        oy1, oy2, ox1, ox2 = cly + ly, cly + ry, clx + lx, clx + rx
+
+        composited = []
+        for face_pil in face_frames:
+            face_bgr = cv2.cvtColor(np.array(face_pil), cv2.COLOR_RGB2BGR)
+            resized = cv2.resize(face_bgr, (ox2 - ox1, oy2 - oy1))
+            mask = 255 * np.ones(resized.shape, resized.dtype)
+            center = ((ox1 + ox2) // 2, (oy1 + oy2) // 2)
+            blended = cv2.seamlessClone(resized, full_img, mask, center, cv2.NORMAL_CLONE)
+            composited.append(Image.fromarray(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB)))
+
+        return composited
 
     def _render_frames(self, x: dict) -> list[Image.Image]:
         """Run the face renderer and return PIL frames directly (no MP4 I/O)."""
